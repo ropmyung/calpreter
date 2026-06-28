@@ -2,10 +2,11 @@ from typing import Literal, Self, cast
 
 
 class Scope:
-    def __init__(self, start: int, end: int = 0) -> None:
+    def __init__(self, start: int, end: int = 0, *, identifier: str = "(") -> None:
         self.internals: list[tuple[int, int] | Self] = [(start, end or start)]
         self.children_counts = 0
         self.depth = 1
+        self.identifier = identifier
 
     def __iter__(self):
         yield self.start

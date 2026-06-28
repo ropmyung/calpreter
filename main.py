@@ -1,6 +1,5 @@
 from parser import Parser
 
-
 if __name__ == "__main__":
     while True:
         expression = input("식 입력: ")
