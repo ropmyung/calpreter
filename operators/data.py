@@ -25,3 +25,7 @@ def power(a: T, b: T) -> T:
 @unary_operator('|', '|')
 def absolute(a: T) -> float:
     return abs(a)
+
+@unary_operator("sin")
+def sin(a: T) -> float:
+    return math.sin(a)

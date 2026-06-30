@@ -1,7 +1,8 @@
-from typing import Any, Callable
+from typing import Any, Self
 
 from scope import Scope
-from operators import *
+from operators.base import get_operator, UnaryOperator, BinaryOperator
+from operators.data import multiply
 
 
 __all__ = [
@@ -15,42 +16,65 @@ _BRACKETS = {
     "[": "]",
 }
 
-
-type ScopedList = list[Operator | Variable | float | ScopedList]
-
-
 class ExpressionSyntaxError(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
 
 
-class Variable:
-    def __init__(self, symbol: str) -> None:
-        self.symbol = symbol
+class TokenizedExpression:
+    def __init__(self, unary_operator: UnaryOperator | None = None) -> None:
+        self._unary_operator = unary_operator
+        self._operands = list[float | str | Self]()
+        self._operators = list[BinaryOperator]()
 
     def __repr__(self) -> str:
-        return self.symbol
+        return self.__class__.__name__ + str(self)
 
-    def __call__(self, data: dict[str, int | float]) -> int | float:
-        return data[self.symbol]
+    def __str__(self) -> str:
+        return (str(self._unary_operator) if self._unary_operator else '') + "(" + self.expression + ")"
+
+    @property
+    def expression(self) -> str:
+        print(self._operands, self._operators, sep="\n")
+        result = ""
+        i = 0
+
+        for op in self._operators:
+            result += str(self._operands[i]) + str(op)
+            i += 1
+        
+        result += str(self._operands[i])
+        
+        return result
+
+    def add_operand(self, value: float | str | Self) -> Self:
+        self._operands.append(value)
+
+        return self
+    
+    def add_operator(self, value: BinaryOperator) -> Self:
+        self._operators.append(value)
+
+        return self
+    
+    def parse(self): ...
 
 
 class Parser:
     def __init__(self, expression: str) -> None:
         self.expression = expression
-        self.terms = []
-        self.variables: dict[str, Variable] = {}
-    
+        self.variables = set[str]()
+
     def assign_variables(self) -> None:
         var_str = ""
 
         for i, char in enumerate(self.expression):
-            if _BRACKETS.get(char) or OPERATOR_REGISTRY.get(char) or char.isdigit():
+            if _BRACKETS.get(char) or get_operator(char) or char.isdigit():
                 return
             
             if char == ':':
                 if var_str:
-                    self.variables[var_str] = Variable(var_str)
+                    self.variables.add(var_str)
 
                 self.expression = self.expression[i + 1:]
 
@@ -60,7 +84,7 @@ class Parser:
                 continue
 
             if char == ',':
-                self.variables[var_str] = Variable(var_str)
+                self.variables.add(var_str)
                 var_str = ""
             else:
                 var_str += char
@@ -95,36 +119,53 @@ class Parser:
             result.append((start, i + 1))
 
         return result
-    
-    def _process_opr_and_vars(self, result: ScopedList, token_str: str) -> str:
-        if token_str:
-            opr_or_var = OPERATOR_REGISTRY.get(token_str, self.variables.get(token_str))
 
-            if opr_or_var is None:
+    def _process_opr_and_vars(self, result: TokenizedExpression, token_str: str, after_num: bool) -> bool:
+        if not token_str:
+            return False
+
+        operator = get_operator(token_str)
+
+        if operator is None:
+            if token_str in self.variables:
+                result.add_operand(token_str)
+
+                if after_num:
+                    result.add_operator(multiply)
+
+                return True
+            else:
                 raise ExpressionSyntaxError(f'Unknown Symbol: {token_str}')
 
-            result.append(opr_or_var)
+        if isinstance(operator, UnaryOperator) and after_num:
+            result.add_operator(multiply)
 
-        return ""
+        result.add_operator(operator)
 
-    def tokenize(self, scopes: list[Scope | tuple[int, int]]) -> ScopedList:
-        result: ScopedList = []
-        current_index = 0
+        return False
+
+    def tokenize(self, scopes: list[Scope | tuple[int, int]]) -> TokenizedExpression:
+        result = TokenizedExpression()
+        after_num = False
 
         for scope in scopes:
             if isinstance(scope, Scope):
-                result.append(self.tokenize(scope.internals))
+                result.add_operand(self.tokenize(scope.internals))
+
+                if after_num:
+                    result.add_operator(multiply)
+
                 continue
 
             num_func = int
             num_token = ""
             opr_token = ""
+            after_num = False
 
             for char in self.expression[scope[0]: scope[1]]:
-                current_index += 1
-
                 if char.isdigit():
-                    opr_token = self._process_opr_and_vars(result, opr_token)
+                    after_num = self._process_opr_and_vars(result, opr_token, after_num) or after_num
+                    opr_token = ""
                     num_token += char
                 elif char == '.':
                     num_token += char
@@ -133,33 +174,36 @@ class Parser:
                     continue
                 else:
                     if num_token:
-                        result.append(num_func(num_token))
+                        result.add_operand(num_func(num_token))
                         num_token = ""
                         num_func = int
+                        after_num = True
 
-                    operator = OPERATOR_REGISTRY.get(char)
+                    operator = get_operator(char)
 
                     if operator is None:
                         opr_token += char
                     else:
-                        opr_token = self._process_opr_and_vars(result, opr_token)
-                        result.append(operator)
+                        after_num = self._process_opr_and_vars(result, opr_token, after_num) or after_num
+                        opr_token = ""
+
+                        result.add_operator(operator)
             else:
                 if num_token:
-                    result.append(num_func(num_token))
+                    result.add_operand(num_func(num_token))
+                    after_num = True
                 
-                self._process_opr_and_vars(result, opr_token)
-            
-            current_index += 1
+                after_num = self._process_opr_and_vars(result, opr_token, bool(num_token)) or after_num
+        else:
+            if after_num:
+                result.add_operator(multiply)
 
         return result
 
-    def parse(self):
-        self.assign_variables()
-        scoped_expressions = self.tokenize(self.get_scopes())
-
-
-
-        def calculator(data: dict[str, int| float]) -> int | float:
-            return 1
+    def parse(self, scoped_expressions: TokenizedExpression | None = None):
+        if scoped_expressions is None:
+            self.assign_variables()
+            scoped_expressions = self.tokenize(self.get_scopes())
+        
+        return scoped_expressions
 
