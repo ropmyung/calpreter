@@ -1,9 +1,15 @@
-from typing import Literal, Self, cast
+from typing import Literal, Self
 
 
 class Scope:
-    def __init__(self, start: int, end: int = 0, *, identifier: str = "(") -> None:
-        self.internals: list[tuple[int, int] | Self] = [(start, end or start)]
+    def __init__(
+        self,
+        start: int,
+        end: int = 0,
+        *,
+        identifier: str = "(",
+    ) -> None:
+        self.internals = list[tuple[int, int] | Self]([(start, end or start)])
         self.children_counts = 0
         self.depth = 1
         self.identifier = identifier
@@ -45,7 +51,7 @@ class Scope:
     @property
     def end(self) -> int:
         return self.internals[-1][1]
-    
+
     @end.setter
     def end(self, value: int) -> None:
         if self.end + self.depth < value:

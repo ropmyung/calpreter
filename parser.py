@@ -3,7 +3,7 @@ from typing import Any, Self
 from scope import Scope
 from operators.base import get_operator, UnaryOperator, BinaryOperator
 from operators.data import multiply
-
+from tokenizer import TokenizedExpression, ExpressionSyntaxError, TokenType
 
 __all__ = [
     "ExpressionSyntaxError",
@@ -16,54 +16,20 @@ _BRACKETS = {
     "[": "]",
 }
 
-class ExpressionSyntaxError(Exception):
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-
-
-class TokenizedExpression:
-    def __init__(self, unary_operator: UnaryOperator | None = None) -> None:
-        self._unary_operator = unary_operator
-        self._operands = list[float | str | Self]()
-        self._operators = list[BinaryOperator]()
-
-    def __repr__(self) -> str:
-        return self.__class__.__name__ + str(self)
-
-    def __str__(self) -> str:
-        return (str(self._unary_operator) if self._unary_operator else '') + "(" + self.expression + ")"
-
-    @property
-    def expression(self) -> str:
-        print(self._operands, self._operators, sep="\n")
-        result = ""
-        i = 0
-
-        for op in self._operators:
-            result += str(self._operands[i]) + str(op)
-            i += 1
-        
-        result += str(self._operands[i])
-        
-        return result
-
-    def add_operand(self, value: float | str | Self) -> Self:
-        self._operands.append(value)
-
-        return self
-    
-    def add_operator(self, value: BinaryOperator) -> Self:
-        self._operators.append(value)
-
-        return self
-    
-    def parse(self): ...
-
 
 class Parser:
     def __init__(self, expression: str) -> None:
         self.expression = expression
         self.variables = set[str]()
+    
+    def add_variable(self, var_name: str) -> None:
+        if get_operator(var_name):
+            raise ExpressionSyntaxError(f'Variable name "{var_name}" corresponds to an operator.')
+
+        if var_name[0].isdigit():
+            raise ExpressionSyntaxError(f'Variable name cannot start with digit: {var_name}')
+
+        self.variables.add(var_name)
 
     def assign_variables(self) -> None:
         var_str = ""
@@ -74,7 +40,7 @@ class Parser:
             
             if char == ':':
                 if var_str:
-                    self.variables.add(var_str)
+                    self.add_variable(var_str)
 
                 self.expression = self.expression[i + 1:]
 
@@ -84,7 +50,7 @@ class Parser:
                 continue
 
             if char == ',':
-                self.variables.add(var_str)
+                self.add_variable(var_str)
                 var_str = ""
             else:
                 var_str += char
@@ -98,13 +64,7 @@ class Parser:
         for i, char in enumerate(self.expression):
             closing_bracket = _BRACKETS.get(char)
 
-            if closing_bracket is not None:
-                if len(stack) == 0 and start + 1 < i:
-                    result.append((start, i))
-
-                stack.append(Scope(i + 1, identifier=char))
-
-            elif stack and char == _BRACKETS.get(stack[-1].identifier):
+            if stack and char == _BRACKETS.get(stack[-1].identifier):
                 bracket = stack.pop()
                 bracket.end = i
 
@@ -114,89 +74,95 @@ class Parser:
                     result.append(bracket)
 
                     start = i + 1
+            
+            elif closing_bracket is not None:
+                if len(stack) == 0 and start + 1 < i:
+                    result.append((start, i))
+
+                stack.append(Scope(i + 1, identifier=char))
 
         if start < i:
             result.append((start, i + 1))
 
         return result
 
-    def _process_opr_and_vars(self, result: TokenizedExpression, token_str: str, after_num: bool) -> bool:
-        if not token_str:
-            return False
-
-        operator = get_operator(token_str)
+    def tokenize_operator(self, result: TokenizedExpression, opr_str: str) -> bool:
+        operator = get_operator(opr_str)
 
         if operator is None:
-            if token_str in self.variables:
-                result.add_operand(token_str)
+            return False
 
-                if after_num:
-                    result.add_operator(multiply)
-
-                return True
-            else:
-                raise ExpressionSyntaxError(f'Unknown Symbol: {token_str}')
-
-        if isinstance(operator, UnaryOperator) and after_num:
+        if isinstance(operator, UnaryOperator) and result.last_token.is_operand():
             result.add_operator(multiply)
 
         result.add_operator(operator)
+        result.last_token = TokenType.OPERATOR
 
-        return False
+        return True
 
     def tokenize(self, scopes: list[Scope | tuple[int, int]]) -> TokenizedExpression:
-        result = TokenizedExpression()
-        after_num = False
+        result = TokenizedExpression(self)
 
         for scope in scopes:
             if isinstance(scope, Scope):
                 result.add_operand(self.tokenize(scope.internals))
 
-                if after_num:
+                if result.last_token.is_operand():
                     result.add_operator(multiply)
+
+                result.last_token = TokenType.SCOPE
 
                 continue
 
             num_func = int
-            num_token = ""
-            opr_token = ""
-            after_num = False
+            number_str = ""
+            opr_or_var_str = ""
 
             for char in self.expression[scope[0]: scope[1]]:
                 if char.isdigit():
-                    after_num = self._process_opr_and_vars(result, opr_token, after_num) or after_num
-                    opr_token = ""
-                    num_token += char
+                    # 숫자 이전에 연산자가 있었는지 확인 및 추가
+                    if opr_or_var_str and not self.tokenize_operator(result, opr_or_var_str):
+                        raise ExpressionSyntaxError(
+                            f'Invalid Position: digit {char} cannot come after variable "{opr_or_var_str}"'
+                        )
+
+                    opr_or_var_str = ""
+                    number_str += char
+                    result.last_token = TokenType.DIGIT
                 elif char == '.':
-                    num_token += char
+                    number_str += char
                     num_func = float
+                    result.last_token = TokenType.POINT
                 elif char.isspace():
                     continue
                 else:
-                    if num_token:
-                        result.add_operand(num_func(num_token))
-                        num_token = ""
+                    if number_str:
+                        result.add_operand(num_func(number_str))
+                        number_str = ""
                         num_func = int
-                        after_num = True
 
                     operator = get_operator(char)
 
                     if operator is None:
-                        opr_token += char
+                        opr_or_var_str += char
                     else:
-                        after_num = self._process_opr_and_vars(result, opr_token, after_num) or after_num
-                        opr_token = ""
+                        if result.last_token.is_operator():
+                            raise ExpressionSyntaxError(f'Invalid Position: {char}')
+
+                        if opr_or_var_str and not self.tokenize_operator(result, opr_or_var_str):
+                            result.add_variable(opr_or_var_str)
+
+                        opr_or_var_str = ""
 
                         result.add_operator(operator)
+                        result.last_token = TokenType.OPERATOR
+
             else:
-                if num_token:
-                    result.add_operand(num_func(num_token))
-                    after_num = True
-                
-                after_num = self._process_opr_and_vars(result, opr_token, bool(num_token)) or after_num
-        else:
-            if after_num:
-                result.add_operator(multiply)
+                if number_str:
+                    result.add_operand(num_func(number_str))
+
+                if opr_or_var_str and not self.tokenize_operator(result, opr_or_var_str):
+                    result.add_variable(opr_or_var_str)
 
         return result
 
@@ -204,6 +170,6 @@ class Parser:
         if scoped_expressions is None:
             self.assign_variables()
             scoped_expressions = self.tokenize(self.get_scopes())
-        
+
         return scoped_expressions
 

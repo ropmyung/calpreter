@@ -1,5 +1,6 @@
-from typing import Any, Callable, overload, TYPE_CHECKING
+from typing import Callable, Self, overload, TYPE_CHECKING
 
+from end_finder import EndFinder
 
 OPERATOR_REGISTRY: dict[str, "Operator"] = {}
 
@@ -26,11 +27,9 @@ class Operator[**P]:
     def __init__(
         self,
         callback: Callable[P, float],
-        symbol: str,
-        end_identifier: str | None = None
+        symbol: str
     ) -> None:
         self.symbol = symbol
-        self.end_identifier = end_identifier
         self._callback = callback
 
         OPERATOR_REGISTRY[symbol] = self
@@ -43,25 +42,44 @@ class Operator[**P]:
 
     def __call__(self, data: OperationData, *args: P.args, **kwargs: P.kwargs) -> float:
         return self._callback(*args, **kwargs)
+    
+    def __eq__(self, value: object) -> bool:
+        if isinstance(value, str):
+            return self.symbol == value
+        elif isinstance(value, Operator):
+            return self.symbol == value.symbol
 
-
-class InputRange:
-    def __init__(self) -> None:
-        pass
+        return NotImplemented
 
 
 class UnaryOperator(Operator[[float]]):
     def __init__(
         self,
-        callback: Callable[[float], float],
         *,
-        start_symbol: str,
-        end_symbol: str | None = None,
+        callback: Callable[[float], float],
+        end_finder: Callable[[Self, str], bool] | None = None,
+        symbol: str,
+        end_index_weight: int = 0
     ) -> None:
-        super().__init__(callback, start_symbol, end_symbol)
+        super().__init__(callback, symbol)
+
+        self.end_index_weight = end_index_weight
+
+        if end_finder is not None:
+            def find_end(char: str) -> bool:
+                return end_finder(self, char)
     
-    def __call__(self, data: OperationData, value: str | float) -> float:
+            self.find_end = find_end
+    
+    def __call__(self, data: OperationData, value: float) -> float:
         return self._callback(data[value])
+
+    def find_end(self, char: str) -> bool:
+        return True
+
+    @property
+    def end_finder(self) -> EndFinder:
+        return EndFinder(self)
 
 
 class BinaryOperator(Operator[[float, float]]):
@@ -78,13 +96,21 @@ def binary_operator(symbol: str):
     
     return decorator
 
-def unary_operator(start_symbol: str, end_symbol: str | None = None ):
+def unary_operator(
+    start_symbol: str,
+    *,
+    end_index_weight: int = 0,
+    end_finder: Callable[[UnaryOperator, str], bool] | None = None
+):
     def decorator(callback: Callable[[float], float]) -> UnaryOperator:
-        return UnaryOperator(callback, start_symbol=start_symbol, end_symbol=end_symbol)
+        return UnaryOperator(
+            callback=callback,
+            symbol=start_symbol,
+            end_index_weight=end_index_weight,
+            end_finder=end_finder
+        )
     
     return decorator
-
-variable = UnaryOperator(lambda x: x, start_symbol='$')
 
 def get_operator(symbol: str) -> BinaryOperator | UnaryOperator:
     operator = OPERATOR_REGISTRY.get(symbol)
@@ -94,3 +120,4 @@ def get_operator(symbol: str) -> BinaryOperator | UnaryOperator:
             raise NotImplementedError
     
     return operator
+
