@@ -1,9 +1,10 @@
 from typing import Any, Self
+from enum import IntEnum
 
-from scope import Scope
-from operators.base import get_operator, UnaryOperator, BinaryOperator
-from operators.data import multiply
-from tokenizer import TokenizedExpression, ExpressionSyntaxError, TokenType
+from calpreter.scope import Scope
+from calpreter.operators.base import get_operator
+from calpreter.tokenizer import TokenizedExpression, ExpressionSyntaxError
+
 
 __all__ = [
     "ExpressionSyntaxError",
@@ -15,6 +16,18 @@ _BRACKETS = {
     "{": "}",
     "[": "]",
 }
+
+
+class CharacterType(IntEnum):
+    Start = 0
+    Digit = 1
+    Point = 2
+    Symbol = 3
+
+
+class InvalidPositionError(ExpressionSyntaxError):
+    def __init__(self, last_char_type: CharacterType, current_char: str) -> None:
+        super().__init__(f'{current_char} cannot come after {last_char_type.name}')
 
 
 class Parser:
@@ -76,93 +89,73 @@ class Parser:
                     start = i + 1
             
             elif closing_bracket is not None:
-                if len(stack) == 0 and start + 1 < i:
+                if len(stack) == 0 and start < i:
                     result.append((start, i))
 
                 stack.append(Scope(i + 1, identifier=char))
 
-        if start < i:
-            result.append((start, i + 1))
+        if start < len(self.expression):
+            result.append((start, len(self.expression)))
 
         return result
-
-    def tokenize_operator(self, result: TokenizedExpression, opr_str: str) -> bool:
-        operator = get_operator(opr_str)
-
-        if operator is None:
-            return False
-
-        if isinstance(operator, UnaryOperator) and result.last_token.is_operand():
-            result.add_operator(multiply)
-
-        result.add_operator(operator)
-        result.last_token = TokenType.OPERATOR
-
-        return True
 
     def tokenize(self, scopes: list[Scope | tuple[int, int]]) -> TokenizedExpression:
         result = TokenizedExpression(self)
 
         for scope in scopes:
             if isinstance(scope, Scope):
-                result.add_operand(self.tokenize(scope.internals))
-
-                if result.last_token.is_operand():
-                    result.add_operator(multiply)
-
-                result.last_token = TokenType.SCOPE
+                result.add_scope(self.tokenize(scope.internals))
 
                 continue
 
             num_func = int
-            number_str = ""
-            opr_or_var_str = ""
+            token_string = ""
+            last_char_type = CharacterType.Start
 
             for char in self.expression[scope[0]: scope[1]]:
                 if char.isdigit():
-                    # 숫자 이전에 연산자가 있었는지 확인 및 추가
-                    if opr_or_var_str and not self.tokenize_operator(result, opr_or_var_str):
-                        raise ExpressionSyntaxError(
-                            f'Invalid Position: digit {char} cannot come after variable "{opr_or_var_str}"'
-                        )
+                    if last_char_type is CharacterType.Symbol:
+                        result.resolve_unknown(token_string)
+                        token_string = ""
 
-                    opr_or_var_str = ""
-                    number_str += char
-                    result.last_token = TokenType.DIGIT
+                    token_string += char
+                    last_char_type = CharacterType.Digit
                 elif char == '.':
-                    number_str += char
+                    if last_char_type is not CharacterType.Digit:
+                        raise InvalidPositionError(last_char_type, "POINT '.'")
+
                     num_func = float
-                    result.last_token = TokenType.POINT
+                    token_string += char
+                    last_char_type = CharacterType.Point
                 elif char.isspace():
                     continue
                 else:
-                    if number_str:
-                        result.add_operand(num_func(number_str))
-                        number_str = ""
+                    if last_char_type is CharacterType.Digit:
+                        result.add_constant(num_func(token_string))
+                        token_string = ""
                         num_func = int
 
                     operator = get_operator(char)
 
                     if operator is None:
-                        opr_or_var_str += char
-                    else:
-                        if result.last_token.is_operator():
-                            raise ExpressionSyntaxError(f'Invalid Position: {char}')
+                        token_string += char
+                        last_char_type = CharacterType.Symbol
 
-                        if opr_or_var_str and not self.tokenize_operator(result, opr_or_var_str):
-                            result.add_variable(opr_or_var_str)
+                        continue
 
-                        opr_or_var_str = ""
+                    if last_char_type is CharacterType.Symbol:
+                        raise InvalidPositionError(last_char_type, char)
 
-                        result.add_operator(operator)
-                        result.last_token = TokenType.OPERATOR
+                    if last_char_type is CharacterType.Symbol:
+                        result.resolve_unknown(token_string)
+                        token_string = ""
 
+                    result.add_operator(operator)
             else:
-                if number_str:
-                    result.add_operand(num_func(number_str))
-
-                if opr_or_var_str and not self.tokenize_operator(result, opr_or_var_str):
-                    result.add_variable(opr_or_var_str)
+                if last_char_type is CharacterType.Digit:
+                    result.add_constant(num_func(token_string))
+                elif last_char_type is CharacterType.Symbol:
+                    result.resolve_unknown(token_string)
 
         return result
 

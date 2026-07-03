@@ -8,22 +8,22 @@ T = TypeVar('T', float, int)
 def cut_by_symbol(operator: UnaryOperator, char: str) -> bool:
     return char == operator.symbol
 
-@binary_operator('+')
+@binary_operator('+', precedence=1)
 def add(a: T, b: T) -> T:
     return a + b
 
-@binary_operator('-')
+@binary_operator('-', precedence=1)
 def subtract(a: T, b: T) -> T:
-    return a + b
+    return a - b
 
 def cut_by_term(operator: UnaryOperator, char: str) -> bool:
     return get_operator(char) in (add, subtract)
 
-@binary_operator('*')
+@binary_operator('*', precedence=2)
 def multiply(a: T, b: T) -> T:
     return a * b
 
-@binary_operator('^')
+@binary_operator('^', precedence=3, right_associative=True)
 def power(a: T, b: T) -> T:
     return a ** b
 

@@ -1,6 +1,6 @@
 from typing import Callable, Self, overload, TYPE_CHECKING
 
-from end_finder import EndFinder
+from calpreter.end_finder import EndFinder
 
 OPERATOR_REGISTRY: dict[str, "Operator"] = {}
 
@@ -27,10 +27,12 @@ class Operator[**P]:
     def __init__(
         self,
         callback: Callable[P, float],
-        symbol: str
+        symbol: str,
+        precedence: int = 0
     ) -> None:
         self.symbol = symbol
         self._callback = callback
+        self.precedence = precedence
 
         OPERATOR_REGISTRY[symbol] = self
 
@@ -83,17 +85,31 @@ class UnaryOperator(Operator[[float]]):
 
 
 class BinaryOperator(Operator[[float, float]]):
-    def __init__(self, callback: Callable[[float, float], float], symbol: str) -> None:
-        super().__init__(callback, symbol)
+    def __init__(
+        self,
+        callback: Callable[[float, float], float],
+        symbol: str,
+        *,
+        precedence: int = 1,
+        right_associative: bool = False
+    ) -> None:
+        super().__init__(callback, symbol, precedence)
 
-    def __call__(self, data: OperationData, right: float | str, left: float | str) -> float:
-        return self._callback(data[right], data[left])
+        self.right_associative = right_associative
+
+    def __call__(self, data: OperationData, left: float | str, right: float | str) -> float:
+        return self._callback(data[left], data[right])
 
 
-def binary_operator(symbol: str):
+def binary_operator(symbol: str, *, precedence: int = 1, right_associative: bool = False):
     def decorator(callback: Callable[[float, float], float]) -> BinaryOperator:
-        return BinaryOperator(callback, symbol)
-    
+        return BinaryOperator(
+            callback,
+            symbol,
+            precedence=precedence,
+            right_associative=right_associative
+        )
+
     return decorator
 
 def unary_operator(

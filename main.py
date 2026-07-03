@@ -1,4 +1,4 @@
-from parser import Parser
+from calpreter.parser import Parser
 
 if __name__ == "__main__":
     while True:
