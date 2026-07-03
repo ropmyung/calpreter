@@ -2,11 +2,9 @@
 
 실행: 프로젝트 루트에서 `python -m pytest` 또는 `python -m pytest test`
 """
-import math
+import math, pytest
 
-import pytest
-
-from helpers import evaluate, compile_expression
+from .helpers import evaluate, compile_expression
 
 
 class TestArithmeticAndPrecedence:
@@ -36,21 +34,19 @@ class TestAssociativity:
 
 
 class TestImplicitMultiplication:
-    @pytest.mark.parametrize("expression, expected", [
-        ("2(3+4)", 14),      # 숫자 * 괄호
-        ("(2)3", 6),         # 괄호 * 숫자
-        ("(2+3)(4)", 20),    # 괄호 * 괄호
-        ("(1+1)(2+2)", 8),
-    ])
-    def test_implicit_multiplication(self, expression, expected):
-        assert evaluate(expression) == expected
+    """곱셈 생략은 인접한 항에 미지수(변수)가 관여할 때만 성립한다.
+
+    수학에서 '23'이 '2*3'이 아니듯, 순수 숫자끼리는 곱셈을 생략할 수 없다.
+    """
 
     @pytest.mark.parametrize("expression, variables, expected", [
-        ("2x", {"x": 5}, 10),        # 숫자 * 변수
-        ("x2", {"x": 5}, 10),        # 변수 * 숫자
-        ("xy", {"x": 3, "y": 4}, 12),  # 변수 * 변수
+        ("x: 2x", {"x": 5}, 10),             # 숫자 * 변수
+        ("x, y: xy", {"x": 3, "y": 4}, 12),  # 변수 * 변수
+        ("x: 2(x+1)", {"x": 3}, 8),          # 숫자 * (미지수 포함 괄호)
+        ("x: x(x+1)", {"x": 2}, 6),          # 변수 * 괄호
+        ("x: (x+1)*2", {"x": 3}, 8),          # (미지수 포함 괄호) * 숫자
     ])
-    def test_implicit_multiplication_with_variables(self, expression, variables, expected):
+    def test_omitted_multiply_requires_variable(self, expression, variables, expected):
         assert evaluate(expression, **variables) == expected
 
 

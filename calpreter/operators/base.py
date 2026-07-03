@@ -128,11 +128,11 @@ def unary_operator(
     
     return decorator
 
-def get_operator(symbol: str) -> BinaryOperator | UnaryOperator:
+def get_operator(symbol: str) -> BinaryOperator | UnaryOperator | None:
     operator = OPERATOR_REGISTRY.get(symbol)
 
     if TYPE_CHECKING:
-        if not isinstance(operator, (UnaryOperator, BinaryOperator)):
+        if not isinstance(operator, (UnaryOperator, BinaryOperator)) and operator is not None:
             raise NotImplementedError
     
     return operator

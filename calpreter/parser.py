@@ -1,8 +1,7 @@
-from typing import Any, Self
 from enum import IntEnum
 
 from calpreter.scope import Scope
-from calpreter.operators.base import get_operator
+from calpreter.operators.data import get_operator
 from calpreter.tokenizer import TokenizedExpression, ExpressionSyntaxError
 
 
@@ -19,10 +18,11 @@ _BRACKETS = {
 
 
 class CharacterType(IntEnum):
-    Start = 0
+    Space = 0
     Digit = 1
     Point = 2
     Symbol = 3
+
 
 
 class InvalidPositionError(ExpressionSyntaxError):
@@ -109,20 +109,22 @@ class Parser:
                 continue
 
             num_func = int
+            char = ''
             token_string = ""
-            last_char_type = CharacterType.Start
+            last_char_type = CharacterType.Space
 
             for char in self.expression[scope[0]: scope[1]]:
                 if char.isdigit():
                     if last_char_type is CharacterType.Symbol:
                         result.resolve_unknown(token_string)
                         token_string = ""
+                        last_char_type = CharacterType.Space
 
                     token_string += char
                     last_char_type = CharacterType.Digit
                 elif char == '.':
                     if last_char_type is not CharacterType.Digit:
-                        raise InvalidPositionError(last_char_type, "POINT '.'")
+                        raise InvalidPositionError(last_char_type, "Point '.'")
 
                     num_func = float
                     token_string += char
@@ -133,24 +135,24 @@ class Parser:
                     if last_char_type is CharacterType.Digit:
                         result.add_constant(num_func(token_string))
                         token_string = ""
-                        num_func = int
+                        last_char_type = CharacterType.Space
 
                     operator = get_operator(char)
 
                     if operator is None:
-                        token_string += char
-                        last_char_type = CharacterType.Symbol
+                        if char in self.variables:
+                            result.add_variable(char)
+                            last_char_type = CharacterType.Space
+                        else:
+                            token_string += char
+                            last_char_type = CharacterType.Symbol
+                    else:
+                        if last_char_type is CharacterType.Symbol:
+                            result.resolve_unknown(token_string)
+                            token_string = ""
 
-                        continue
-
-                    if last_char_type is CharacterType.Symbol:
-                        raise InvalidPositionError(last_char_type, char)
-
-                    if last_char_type is CharacterType.Symbol:
-                        result.resolve_unknown(token_string)
-                        token_string = ""
-
-                    result.add_operator(operator)
+                        result.add_operator(operator)
+                        last_char_type = CharacterType.Space
             else:
                 if last_char_type is CharacterType.Digit:
                     result.add_constant(num_func(token_string))

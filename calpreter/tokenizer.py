@@ -52,6 +52,11 @@ class UnknownSymbol(ExpressionSyntaxError):
         super().__init__(f'"{symbol_name}" is unknown')
 
 
+class CoefficientError(ExpressionSyntaxError):
+    def __init__(self, number: float, last_token: TokenType) -> None:
+        super().__init__(f'Coefficient "{number}" should come before {last_token.name}')
+
+
 class TokenizedExpression:
     """토큰화된 수식 한 스코프(괄호 범위)를 담는 중간 표현.
 
@@ -101,6 +106,9 @@ class TokenizedExpression:
         self._last_token = TokenType.SCOPE
 
     def add_constant(self, value: float) -> None:
+        if self._last_token.is_operand():
+            raise CoefficientError(value, self._last_token)
+
         self._operands.append(value)
         self._last_token = TokenType.CONSTANT
 
@@ -119,18 +127,20 @@ class TokenizedExpression:
         else:
             raise UnknownSymbol(name)
 
-    def resolve_unknown(self, token_string: str) -> None:
+    def resolve_unknown(self, token_string: str) -> bool:
         operator = get_operator(token_string)
 
         if operator is None:
             self.add_variable(token_string)
-            
-            return
+
+            return True
 
         if isinstance(operator, UnaryOperator) and self._last_token.is_operand():
             self.add_operator(multiply)
 
         self.add_operator(operator)
+
+        return False
 
     def parse(self) -> Callable[[OperationData], float]:
         """토큰들을 연산자 우선순위에 따라 중첩 클로저 하나로 컴파일한다.
