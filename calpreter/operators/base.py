@@ -28,11 +28,12 @@ class Operator[**P]:
         self,
         callback: Callable[P, float],
         symbol: str,
-        precedence: int = 0
+        precedence: int = 100
     ) -> None:
         self.symbol = symbol
         self._callback = callback
         self.precedence = precedence
+        self.right_associative = False
 
         OPERATOR_REGISTRY[symbol] = self
 

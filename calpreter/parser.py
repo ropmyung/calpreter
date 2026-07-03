@@ -24,7 +24,6 @@ class CharacterType(IntEnum):
     Symbol = 3
 
 
-
 class InvalidPositionError(ExpressionSyntaxError):
     def __init__(self, last_char_type: CharacterType, current_char: str) -> None:
         super().__init__(f'{current_char} cannot come after {last_char_type.name}')
@@ -161,10 +160,8 @@ class Parser:
 
         return result
 
-    def parse(self, scoped_expressions: TokenizedExpression | None = None):
-        if scoped_expressions is None:
-            self.assign_variables()
-            scoped_expressions = self.tokenize(self.get_scopes())
+    def parse(self):
+        self.assign_variables()
 
-        return scoped_expressions
+        return self.tokenize(self.get_scopes()).parse()
 

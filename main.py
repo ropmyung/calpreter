@@ -8,4 +8,6 @@ if __name__ == "__main__":
             print("종료 중...")
             break
 
+        parser = Parser(expression)
+
         print(Parser(expression).parse())

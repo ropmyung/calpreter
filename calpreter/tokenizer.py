@@ -57,6 +57,11 @@ class CoefficientError(ExpressionSyntaxError):
         super().__init__(f'Coefficient "{number}" should come before {last_token.name}')
 
 
+class InvalidPositionError(ExpressionSyntaxError):
+    def __init__(self, last_token: TokenType, current_token: TokenType) -> None:
+        super().__init__(f'{current_token.name} cannot come after {last_token.name}')
+
+
 class TokenizedExpression:
     """토큰화된 수식 한 스코프(괄호 범위)를 담는 중간 표현.
 
@@ -75,6 +80,7 @@ class TokenizedExpression:
         self._last_token = TokenType.START
         self._operands = list[float | str | Self]()
         self._operators = list[Operator]()
+        self._binary_count = 0
 
     def __repr__(self) -> str:
         return self.__class__.__name__ + str(self)
@@ -113,8 +119,15 @@ class TokenizedExpression:
         self._last_token = TokenType.CONSTANT
 
     def add_operator(self, value: Operator) -> None:
+        if isinstance(value, BinaryOperator):
+            if self._last_token == TokenType.BINARY:
+                raise InvalidPositionError(self._last_token, TokenType.BINARY)
+            
+            self._last_token = TokenType.BINARY
+        else:
+            self._last_token = TokenType.UNARY
+
         self._operators.append(value)
-        self._last_token = TokenType.OPERATOR
 
     def add_variable(self, name: str) -> None:
         if name in self.parser.variables:
@@ -153,14 +166,9 @@ class TokenizedExpression:
         """
         if not self._operands:
             raise ExpressionSyntaxError('Empty expression')
-
-        # 클래스 불변식 검증: 피연산자 수 == 이항 연산자 수 + 1
-        binary_count = sum(
-            not isinstance(op, UnaryOperator) for op in self._operators
-        )
-
-        if len(self._operands) != binary_count + 1:
-            raise ExpressionSyntaxError('Incomplete expression: operand missing')
+        
+        if self._last_token is TokenType.BINARY:
+            raise ExpressionSyntaxError(f'{TokenType.BINARY.name} cannot come last')
 
         # 컴파일된 노드(피연산자) 스택과 결합 대기 중인 연산자 스택
         output = list[Callable[[OperationData], float]]()
@@ -190,10 +198,6 @@ class TokenizedExpression:
                 )
 
         def binds_tighter(top: Operator, incoming: BinaryOperator) -> bool:
-            # 단항 연산자는 항상 이항 연산자보다 먼저 결합한다.
-            if isinstance(top, UnaryOperator):
-                return True
-
             if incoming.right_associative:
                 return top.precedence > incoming.precedence
 
