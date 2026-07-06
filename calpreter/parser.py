@@ -1,7 +1,8 @@
+from typing import Callable
 from enum import IntEnum
 
 from calpreter.scope import Scope
-from calpreter.operators.data import get_operator
+from calpreter.operators import get_operator, OperationData
 from calpreter.tokenizer import TokenizedExpression, ExpressionSyntaxError
 
 
@@ -68,10 +69,10 @@ class Parser:
                 var_str += char
 
     def get_scopes(self) -> list[Scope | tuple[int, int]]:
+        """괄호 구조를 Scope 트리와 (start, end) 텍스트 구간으로 분해한다."""
         stack: list[Scope] = []
         result: list[Scope | tuple[int, int]] = []
         start = 0
-        i = 0
 
         for i, char in enumerate(self.expression):
             closing_bracket = _BRACKETS.get(char)
@@ -86,7 +87,7 @@ class Parser:
                     result.append(bracket)
 
                     start = i + 1
-            
+
             elif closing_bracket is not None:
                 if len(stack) == 0 and start < i:
                     result.append((start, i))
@@ -99,25 +100,44 @@ class Parser:
         return result
 
     def tokenize(self, scopes: list[Scope | tuple[int, int]]) -> TokenizedExpression:
+        """스코프 목록을 하나의 TokenizedExpression으로 변환한다.
+
+        범위형 단항 연산자(end_finder 보유)를 만나면 result에 하위 표현식을
+        열고 이후 토큰을 그 안에 쌓는다. 범위는 find_end가 True가 되는
+        문자나 이 스코프의 끝에서 닫힌다. 괄호 내부는 재귀 호출이 따로
+        처리하므로 괄호 안의 문자는 바깥 범위를 끝내지 못한다: sin(x+1)의 +
+        """
         result = TokenizedExpression(self)
 
         for scope in scopes:
             if isinstance(scope, Scope):
-                result.add_scope(self.tokenize(scope.internals))
+                result.current().add_scope(self.tokenize(scope.internals))
 
                 continue
 
             num_func = int
-            char = ''
             token_string = ""
             last_char_type = CharacterType.Space
 
             for char in self.expression[scope[0]: scope[1]]:
+                # 열린 단항 범위가 이 문자에서 끝나면 누적 토큰을 확정하고 닫는다
+                if result.range_ends(char):
+                    if last_char_type is CharacterType.Digit:
+                        result.current().add_constant(num_func(token_string))
+                        num_func = int
+                    elif last_char_type is CharacterType.Symbol:
+                        result.resolve_unknown(token_string)
+
+                    token_string = ""
+                    last_char_type = CharacterType.Space
+
+                    if result.close_ranges(char):
+                        continue
+
                 if char.isdigit():
                     if last_char_type is CharacterType.Symbol:
                         result.resolve_unknown(token_string)
                         token_string = ""
-                        last_char_type = CharacterType.Space
 
                     token_string += char
                     last_char_type = CharacterType.Digit
@@ -129,18 +149,33 @@ class Parser:
                     token_string += char
                     last_char_type = CharacterType.Point
                 elif char.isspace():
-                    continue
-                else:
+                    # 공백은 토큰 경계다: sin sin x 처럼 이어지는 토큰을 구분한다
                     if last_char_type is CharacterType.Digit:
-                        result.add_constant(num_func(token_string))
+                        result.current().add_constant(num_func(token_string))
+                        num_func = int
+                    elif last_char_type is CharacterType.Symbol:
+                        result.resolve_unknown(token_string)
+
+                    token_string = ""
+                    last_char_type = CharacterType.Space
+                else:
+                    # 연산자/변수 앞의 누적 숫자는 상수로 확정한다: 2x -> 2, x
+                    if last_char_type is CharacterType.Digit:
+                        result.current().add_constant(num_func(token_string))
                         token_string = ""
+                        num_func = int
                         last_char_type = CharacterType.Space
 
                     operator = get_operator(char)
 
                     if operator is None:
                         if char in self.variables:
-                            result.add_variable(char)
+                            # 한 글자 변수 앞의 미확정 토큰을 먼저 확정한다: sinx -> sin, x
+                            if last_char_type is CharacterType.Symbol:
+                                result.resolve_unknown(token_string)
+                                token_string = ""
+
+                            result.current().add_variable(char)
                             last_char_type = CharacterType.Space
                         else:
                             token_string += char
@@ -150,17 +185,17 @@ class Parser:
                             result.resolve_unknown(token_string)
                             token_string = ""
 
-                        result.add_operator(operator)
+                        result.apply_operator(operator)
                         last_char_type = CharacterType.Space
             else:
                 if last_char_type is CharacterType.Digit:
-                    result.add_constant(num_func(token_string))
+                    result.current().add_constant(num_func(token_string))
                 elif last_char_type is CharacterType.Symbol:
                     result.resolve_unknown(token_string)
 
         return result
 
-    def parse(self):
+    def parse(self) -> Callable[[OperationData], float]:
         self.assign_variables()
 
         return self.tokenize(self.get_scopes()).parse()

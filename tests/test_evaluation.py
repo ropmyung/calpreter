@@ -95,6 +95,73 @@ class TestUnaryOperators:
         assert evaluate("x:sin(x)", x=math.pi / 2) == pytest.approx(1.0)
 
 
+class TestUnaryOperatorRanges:
+    """end_finder에 의한 단항 연산자 자동 범위 지정.
+
+    - | : 짝 기호(|)를 만날 때까지가 범위 (cut_by_symbol)
+    - sin : +, - 를 만날 때까지가 범위 (cut_by_term)
+    - 바깥 스코프가 닫히거나 수식이 끝나도 범위는 종료된다
+    """
+
+    @pytest.mark.parametrize("expression, expected", [
+        ("|3-5|", 2),            # abs(3-5) — 범위가 안 묶이면 -2
+        ("|3+2|", 5),
+        ("2|3|", 6),             # 곱하기 생략 * 절댓값
+        ("|2(3-5)|", 4),         # 범위 안에 괄호
+        ("|3|+|5|", 8),          # 연속 두 쌍
+        ("(|3-5|)", 2),          # 괄호 안 절댓값
+    ])
+    def test_symbol_delimited_range(self, expression, expected):
+        assert evaluate(expression) == expected
+
+    @pytest.mark.parametrize("expression, variables, expected", [
+        ("x: sin x + 1", {"x": 0}, 1.0),                     # sin(x)+1
+        ("x: sin x - 1", {"x": 0}, -1.0),                    # -도 범위 종료
+        ("x: sin 2x + 1", {"x": math.pi / 2}, 1.0),          # sin(2x)+1 = sin(pi)+1
+        ("x: sin 2(x+1) + 1", {"x": math.pi / 2 - 1}, 1.0),  # sin(2(x+1))+1
+        ("x: sin sin x", {"x": 0}, 0.0),                     # sin(sin(x))
+        ("x: |sin x|", {"x": -math.pi / 2}, 1.0),            # 단항 범위 중첩
+        ("x: |x-5|", {"x": 2}, 3),
+        ("x: 2|x|+1", {"x": -3}, 7),
+    ])
+    def test_term_delimited_range(self, expression, variables, expected):
+        assert evaluate(expression, **variables) == pytest.approx(expected)
+
+    @pytest.mark.parametrize("expression, expected", [
+        ("(2sin(0))", 0.0),      # 닫는 괄호가 sin 범위를 함께 종료
+        ("(1+sin(0))*2", 2.0),
+    ])
+    def test_range_ends_with_enclosing_scope(self, expression, expected):
+        assert evaluate(expression) == pytest.approx(expected)
+
+
+class TestUnaryMinus:
+    """단항 마이너스: 뺄셈은 음수의 덧셈으로 처리된다 (2-3 -> 2+(-3))."""
+
+    @pytest.mark.parametrize("expression, expected", [
+        ("-3", -3),
+        ("-3+5", 2),
+        ("2--3", 5),             # 2+(-(-3))
+        ("2*-3", -6),
+        ("2^-3", 0.125),         # 지수 자리의 음수
+        ("-3^2", -9),            # -(3^2): ^가 단항 마이너스보다 먼저 결합
+        ("-2*3", -6),            # (-2)*3: 단항 마이너스가 *보다 먼저 결합
+        ("-(2+3)", -5),
+        ("|-3|", 3),             # 절댓값 안 음수
+    ])
+    def test_unary_minus(self, expression, expected):
+        assert evaluate(expression) == pytest.approx(expected)
+
+    @pytest.mark.parametrize("expression, variables, expected", [
+        ("x: -x", {"x": 4}, -4),
+        ("x: 2-x", {"x": 3}, -1),
+        ("x: -x^2", {"x": 3}, -9),
+        ("x: -2x", {"x": 3}, -6),
+    ])
+    def test_unary_minus_with_variables(self, expression, variables, expected):
+        assert evaluate(expression, **variables) == pytest.approx(expected)
+
+
 class TestFloats:
     @pytest.mark.parametrize("expression, expected", [
         ("1.5+2", 3.5),
@@ -120,8 +187,10 @@ class TestErrors:
 
     @pytest.mark.parametrize("expression", [
         "2+",       # 피연산자 부족
+        "2-",       # 단항 마이너스 뒤 피연산자 없음
         "()",       # 빈 스코프
         "1++2",     # 연산자 뒤 이항연산자
+        "*3",       # 이항 연산자로 시작
     ])
     def test_malformed_expression_raises(self, expression):
         from calpreter.tokenizer import ExpressionSyntaxError

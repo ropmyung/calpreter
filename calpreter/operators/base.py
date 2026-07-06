@@ -56,17 +56,30 @@ class Operator[**P]:
 
 
 class UnaryOperator(Operator[[float]]):
+    """전위 단항 연산자.
+
+    - end_finder가 주어지면 토큰화 단계에서 피연산자 범위가 자동으로 정해진다:
+      find_end(char)가 True가 되는 문자 또는 자신이 속한 스코프의 끝에서
+      범위가 닫힌다. 종료 문자가 연산자 자신의 기호면(|x|의 닫는 |) 함께
+      소비되고, +, - 같은 다른 연산자면 소비되지 않고 바깥 내용으로 남는다.
+    - implicit_operator는 피연산자 바로 뒤에 연산자 생략으로 등장했을 때
+      삽입될 이항 연산자다. 지정하지 않으면 곱하기가 삽입된다.
+      예: 2sin(x) -> 2*sin(x), 단항 마이너스는 덧셈: 2-3 -> 2+(-3)
+    """
+
     def __init__(
         self,
         *,
         callback: Callable[[float], float],
         end_finder: Callable[[Self, str], bool] | None = None,
         symbol: str,
-        end_index_weight: int = 0
+        implicit_operator: "BinaryOperator | None" = None,
+        precedence: int = 100
     ) -> None:
-        super().__init__(callback, symbol)
+        super().__init__(callback, symbol, precedence)
 
-        self.end_index_weight = end_index_weight
+        self.has_end_finder = end_finder is not None
+        self.implicit_operator = implicit_operator
 
         if end_finder is not None:
             def find_end(char: str) -> bool:
@@ -116,17 +129,19 @@ def binary_operator(symbol: str, *, precedence: int = 1, right_associative: bool
 def unary_operator(
     start_symbol: str,
     *,
-    end_index_weight: int = 0,
-    end_finder: Callable[[UnaryOperator, str], bool] | None = None
+    end_finder: Callable[[UnaryOperator, str], bool] | None = None,
+    implicit_operator: BinaryOperator | None = None,
+    precedence: int = 100
 ):
     def decorator(callback: Callable[[float], float]) -> UnaryOperator:
         return UnaryOperator(
             callback=callback,
             symbol=start_symbol,
-            end_index_weight=end_index_weight,
-            end_finder=end_finder
+            end_finder=end_finder,
+            implicit_operator=implicit_operator,
+            precedence=precedence
         )
-    
+
     return decorator
 
 def get_operator(symbol: str) -> BinaryOperator | UnaryOperator | None:

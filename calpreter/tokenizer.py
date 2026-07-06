@@ -80,6 +80,9 @@ class TokenizedExpression:
         self._last_token = TokenType.START
         self._operands = list[float | str | Self]()
         self._operators = list[Operator]()
+        # 토큰화 중에 열려 있는 단항 연산자 범위들: (연산자, 토큰이 쌓이는 하위 표현식)
+        # 스코프별 최상위 표현식만 사용하며, 토큰은 항상 current()에 쌓인다.
+        self._open_ranges = list[tuple[UnaryOperator, Self]]()
         self._binary_count = 0
 
     def __repr__(self) -> str:
@@ -120,14 +123,26 @@ class TokenizedExpression:
 
     def add_operator(self, value: Operator) -> None:
         if isinstance(value, BinaryOperator):
-            if self._last_token == TokenType.BINARY:
+            # 이항 연산자의 좌변은 피연산자여야 한다: "-3", "1++2" 등 차단
+            if not self._last_token.is_operand():
                 raise InvalidPositionError(self._last_token, TokenType.BINARY)
-            
+
             self._last_token = TokenType.BINARY
         else:
             self._last_token = TokenType.UNARY
 
         self._operators.append(value)
+
+    def add_unary(self, operator: UnaryOperator) -> None:
+        """단항 연산자를 추가한다. 직전이 피연산자면 생략된 연산자를 삽입한다.
+
+        삽입할 연산자는 operator.implicit_operator가 정한다.
+        (기본은 곱하기: 2|3| -> 2*|3|, 단항 마이너스는 덧셈: 2-3 -> 2+(-3))
+        """
+        if self._last_token.is_operand():
+            self.add_operator(operator.implicit_operator or multiply)
+
+        self.add_operator(operator)
 
     def add_variable(self, name: str) -> None:
         if name in self.parser.variables:
@@ -140,20 +155,79 @@ class TokenizedExpression:
         else:
             raise UnknownSymbol(name)
 
-    def resolve_unknown(self, token_string: str) -> bool:
+    def resolve_unknown(self, token_string: str) -> None:
+        """여러 글자 토큰을 변수 또는 연산자로 확정한다."""
         operator = get_operator(token_string)
 
         if operator is None:
-            self.add_variable(token_string)
+            self.current().add_variable(token_string)
+        else:
+            self.apply_operator(operator)
 
-            return True
+    def apply_operator(self, operator: Operator) -> None:
+        """연산자를 현재 표현식에 적용한다. 범위형 단항 연산자면 범위를 연다."""
+        if not isinstance(operator, UnaryOperator):
+            self.current().add_operator(operator)
+        elif operator.has_end_finder:
+            self.open_range(operator)
+        else:
+            self.current().add_unary(operator)
 
-        if isinstance(operator, UnaryOperator) and self._last_token.is_operand():
-            self.add_operator(multiply)
+    def current(self) -> Self:
+        """토큰이 쌓일 표현식 — 가장 안쪽에 열린 단항 범위, 없으면 자기 자신."""
+        if self._open_ranges:
+            return self._open_ranges[-1][1]
 
-        self.add_operator(operator)
+        return self
 
-        return False
+    def open_range(self, operator: UnaryOperator) -> None:
+        """범위형 단항 연산자의 범위를 연다.
+
+        하위 표현식을 만들어 현재 위치에 피연산자로 붙이고, 범위가 닫힐
+        때까지 이후 토큰은 그 하위 표현식에 쌓인다. 스코프가 끝날 때까지
+        닫히지 않은 범위는 그대로 두면 된다 (이미 피연산자로 붙어 있다).
+        """
+        target = self.current()
+        sub = self.__class__(self.parser)
+
+        target.add_unary(operator)
+        target.add_scope(sub)
+
+        self._open_ranges.append((operator, sub))
+
+    def range_ends(self, char: str) -> bool:
+        """열려 있는 단항 범위 중 char로 끝나는 것이 있는지 확인한다."""
+        return self._find_range_end(char) is not None
+
+    def close_ranges(self, char: str) -> bool:
+        """char로 끝나는 단항 범위들을 닫는다. 문자를 소비했으면 True.
+
+        바깥 범위가 끝나면 안쪽 범위들도 함께 끝나고(|sin x|의 닫는 |),
+        소비되지 않은 문자는 남은 범위를 연달아 끝낼 수 있다(sin sin x + 1의 +).
+        """
+        consumed = False
+
+        while not consumed:
+            depth = self._find_range_end(char)
+
+            if depth is None:
+                break
+
+            # depth보다 안쪽(위)의 범위들은 바깥 범위가 끝나면서 함께 닫힌다
+            del self._open_ranges[depth + 1:]
+
+            operator, _ = self._open_ranges.pop()
+            consumed = char == operator.symbol
+
+        return consumed
+
+    def _find_range_end(self, char: str) -> int | None:
+        """가장 안쪽부터 검사해 char로 끝나는 첫 범위의 깊이를 찾는다."""
+        for depth in range(len(self._open_ranges) - 1, -1, -1):
+            if self._open_ranges[depth][0].find_end(char):
+                return depth
+
+        return None
 
     def parse(self) -> Callable[[OperationData], float]:
         """토큰들을 연산자 우선순위에 따라 중첩 클로저 하나로 컴파일한다.
@@ -166,9 +240,9 @@ class TokenizedExpression:
         """
         if not self._operands:
             raise ExpressionSyntaxError('Empty expression')
-        
-        if self._last_token is TokenType.BINARY:
-            raise ExpressionSyntaxError(f'{TokenType.BINARY.name} cannot come last')
+
+        if self._last_token.is_operator():
+            raise ExpressionSyntaxError(f'{self._last_token.name} cannot come last')
 
         # 컴파일된 노드(피연산자) 스택과 결합 대기 중인 연산자 스택
         output = list[Callable[[OperationData], float]]()

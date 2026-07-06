@@ -2,6 +2,7 @@
 
 get_scopes 는 최상위 구간을 (start, end) 튜플과 Scope(괄호) 로 나눈다.
 과거 off-by-one 버그(괄호 앞 한 글자 / 마지막 구간 누락)의 회귀를 막는다.
+(범위형 단항 연산자의 범위는 get_scopes가 아니라 tokenize가 정한다)
 """
 from calpreter.parser import Parser
 from calpreter.scope import Scope
