@@ -1,3 +1,13 @@
 __pycache__
 .claude
 .pytest_cache
+
+# 빌드 / 배포 산출물
+build/
+dist/
+*.egg-info/
+*.egg
+
+# 가상환경
+.venv/
+venv/
