@@ -2,7 +2,7 @@ from typing import Callable
 from enum import IntEnum
 
 from calpreter.scope import Scope
-from calpreter.operators import get_operator, OperationData
+from calpreter.operators import get_operator, get_constant, OperationData
 from calpreter.tokenizer import TokenizedExpression, ExpressionSyntaxError
 
 
@@ -38,6 +38,9 @@ class Parser:
     def add_variable(self, var_name: str) -> None:
         if get_operator(var_name):
             raise ExpressionSyntaxError(f'Variable name "{var_name}" corresponds to an operator.')
+
+        if get_constant(var_name) is not None:
+            raise ExpressionSyntaxError(f'Variable name "{var_name}" is a reserved constant.')
 
         if var_name[0].isdigit():
             raise ExpressionSyntaxError(f'Variable name cannot start with digit: {var_name}')

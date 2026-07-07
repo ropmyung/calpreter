@@ -1,9 +1,14 @@
 from typing import TypeVar
 import math
 
-from .base import binary_operator, unary_operator, get_operator, UnaryOperator
+from .base import binary_operator, unary_operator, constant, get_operator, UnaryOperator
 
 T = TypeVar('T', float, int)
+
+# 내장 상수 (미지수처럼 곱셈 생략 가능: 2pi -> 2*pi)
+constant('pi', math.pi, 'π')
+constant('e', math.e)
+constant('tau', math.tau, 'τ')
 
 def cut_by_symbol(operator: UnaryOperator, char: str) -> bool:
     return char == operator.symbol

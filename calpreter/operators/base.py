@@ -1,8 +1,7 @@
-from typing import Callable, Self, overload, TYPE_CHECKING
-
-from calpreter.end_finder import EndFinder
+from typing import Callable, Self, TYPE_CHECKING
 
 OPERATOR_REGISTRY: dict[str, "Operator"] = {}
+CONSTANT_REGISTRY: dict[str, float] = {}
 
 
 class DataException(Exception):
@@ -93,10 +92,6 @@ class UnaryOperator(Operator[[float]]):
     def find_end(self, char: str) -> bool:
         return True
 
-    @property
-    def end_finder(self) -> EndFinder:
-        return EndFinder(self)
-
 
 class BinaryOperator(Operator[[float, float]]):
     def __init__(
@@ -150,6 +145,29 @@ def get_operator(symbol: str) -> BinaryOperator | UnaryOperator | None:
     if TYPE_CHECKING:
         if not isinstance(operator, (UnaryOperator, BinaryOperator)) and operator is not None:
             raise NotImplementedError
-    
+
     return operator
+
+
+def get_constant(name: str) -> float | None:
+    """등록된 상수 값을 반환한다. 없으면 None."""
+    return CONSTANT_REGISTRY.get(name)
+
+
+def constant(name: str, value: float, *aliases: str) -> None:
+    """상수를 등록한다. 여러 이름(별칭)을 같은 값에 매길 수 있다.
+
+    예: constant("pi", math.pi, "π") 는 pi 와 π 를 모두 원주율로 등록한다.
+
+    상수 이름은 숫자로 시작할 수 없고, 연산자 기호와 겹칠 수 없다
+    (겹치면 연산자가 우선해 상수가 인식되지 않기 때문).
+    """
+    for key in (name, *aliases):
+        if not key or key[0].isdigit():
+            raise ValueError(f'Invalid constant name: {key!r}')
+
+        if get_operator(key) is not None:
+            raise ValueError(f'Constant name "{key}" collides with an operator.')
+
+        CONSTANT_REGISTRY[key] = float(value)
 

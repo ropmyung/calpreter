@@ -1,7 +1,7 @@
 from typing import Self, Callable, TYPE_CHECKING
 from enum import IntEnum
 
-from calpreter.operators.base import Operator, UnaryOperator, BinaryOperator, OperationData
+from calpreter.operators.base import Operator, UnaryOperator, BinaryOperator, OperationData, get_constant
 from calpreter.operators.data import multiply, get_operator
 
 
@@ -150,19 +150,39 @@ class TokenizedExpression:
 
             if self._last_token.is_operand():
                 self.add_operator(multiply)
-            
+
             self._last_token = TokenType.VARIABLE
         else:
             raise UnknownSymbol(name)
 
+    def add_named_value(self, value: float) -> None:
+        """이름을 가진 상수(pi, e 등)를 피연산자로 추가한다.
+
+        값은 컴파일 시점에 확정되며, 변수처럼 직전이 피연산자면 곱셈을
+        생략한다: 2pi -> 2*pi.
+        """
+        self._operands.append(value)
+
+        if self._last_token.is_operand():
+            self.add_operator(multiply)
+
+        self._last_token = TokenType.CONSTANT
+
     def resolve_unknown(self, token_string: str) -> None:
-        """여러 글자 토큰을 변수 또는 연산자로 확정한다."""
+        """여러 글자 토큰을 연산자·상수·변수 순으로 확정한다."""
         operator = get_operator(token_string)
 
-        if operator is None:
-            self.current().add_variable(token_string)
-        else:
+        if operator is not None:
             self.apply_operator(operator)
+
+            return
+
+        value = get_constant(token_string)
+
+        if value is not None:
+            self.current().add_named_value(value)
+        else:
+            self.current().add_variable(token_string)
 
     def apply_operator(self, operator: Operator) -> None:
         """연산자를 현재 표현식에 적용한다. 범위형 단항 연산자면 범위를 연다."""
